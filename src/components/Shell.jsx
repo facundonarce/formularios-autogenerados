@@ -127,8 +127,11 @@ export default function Shell() {
             </div>
           </header>
           <main className="flex-1 overflow-y-auto px-4 sm:px-6 pb-8">
-            {error && !data && <div className="text-xs text-mal">{error}</div>}
-            {!data ? (
+            {error && !data ? (
+              <div className="max-w-xl mt-6 rounded-2xl border border-mal/30 bg-mal-bg p-4 text-xs text-tx">
+                <div className="font-bold text-mal mb-1">No se pudo cargar el dataset</div>{error}
+              </div>
+            ) : !data ? (
               <div className="h-64 flex items-center justify-center"><Spinner texto="Cargando modelo de datos de auditoría…" /></div>
             ) : <Outlet />}
           </main>

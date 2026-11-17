@@ -3,11 +3,12 @@
 //   POST /api/admin { accion: 'reenviar', formulario, cuando: 'ahora' | 'franja' }   (admin, responsable)
 //   POST /api/admin { accion: 'no_realizado', formulario }                            (admin, responsable)
 //   POST /api/admin { accion: 'revisar', respuesta, valor }                           (admin, responsable)
+//   POST /api/admin { accion: 'reevaluar', formulario }                               (admin, responsable)
 //   POST /api/admin { accion: 'cruce', formulario, coincide }                         (admin)
 //   POST /api/admin { accion: 'programar_ahora', tienda, tipo }                       (admin) — prueba manual
 import { json, bodyDe, manejar, error, appUrl } from './_lib/http.js';
 import { usuarioDesde, exigirRol } from './_lib/auth.js';
-import { cargar, dataset, reenviar, marcarNoRealizado, revisar, registrarCruce, nuevoFormulario, despachar } from './_lib/servicio.js';
+import { cargar, dataset, reenviar, marcarNoRealizado, revisar, registrarCruce, nuevoFormulario, despachar, reevaluar } from './_lib/servicio.js';
 import { agregarFilas, leerTablas } from './_lib/sheets.js';
 
 export default manejar(async (req, res) => {
@@ -28,6 +29,9 @@ export default manejar(async (req, res) => {
     case 'revisar':
       exigirRol(usuario, 'admin', 'responsable');
       return json(res, 200, await revisar(ctx, b.respuesta, b.valor, usuario));
+    case 'reevaluar':
+      exigirRol(usuario, 'admin', 'responsable');
+      return json(res, 200, await reevaluar(ctx, b.formulario));
     case 'cruce':
       exigirRol(usuario, 'admin');
       return json(res, 200, await registrarCruce(ctx, b.formulario, !!b.coincide, usuario));

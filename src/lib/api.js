@@ -71,6 +71,7 @@ async function accionDemo(b) {
     if (!b.coincide) f.estado = 'anulado';
     return { ok: true };
   }
+  if (b.accion === 'reevaluar') return { ok: true, evaluadas: 0, errores: [] };
   if (b.accion === 'programar_ahora') return { ok: true, id: 'demo', link: `${location.origin}${location.pathname}#/f/demo` };
   throw new Error('Acción desconocida');
 }

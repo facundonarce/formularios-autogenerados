@@ -1,7 +1,7 @@
 // Agente evaluador: manda el video de una toma a Gemini con las preguntas que cubre
 // y recibe una respuesta por pregunta, con confianza, motivo y segundo del video.
 const BASE = 'https://generativelanguage.googleapis.com';
-const MODEL = () => process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const MODEL = () => process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 const INLINE_MAX = 18 * 1024 * 1024;
 
 function opcionesDe(p) {

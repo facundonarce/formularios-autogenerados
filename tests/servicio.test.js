@@ -119,3 +119,16 @@ test('vencido sin abrir a los 15 minutos', async () => {
   await s.tick('https://x', new Date(Date.now() + 16 * 60000));
   assert.equal(f.estado, 'vencido');
 });
+
+test('reevaluar tomas que quedaron con error', async () => {
+  const f = semanal(0);
+  const toma = String(f.tomas).split(',')[1];
+  db.Evidencias.push({ id: 'E-err', formulario_id: f.id, toma, archivo_id: 'drive999', url: 'https://drive/y', error: 'Gemini caído' });
+  const antes = db.Respuestas.length;
+  const ctx = await s.cargar();
+  const r = await s.reevaluar(ctx, f.id);
+  assert.equal(r.evaluadas, 1);
+  assert.ok(db.Respuestas.length > antes);
+  assert.equal(db.Evidencias.find((e) => e.id === 'E-err').error, '');
+  await assert.rejects(async () => s.reevaluar(await s.cargar(), f.id), /No hay tomas/);
+});

@@ -1,7 +1,8 @@
 // Drawer con el detalle de un formulario: datos, cadena de reenvíos, evidencias y respuestas por toma.
-import { Video, Mic, CheckCircle2, AlertTriangle, Clock, ExternalLink } from 'lucide-react';
+import { useState } from 'react';
+import { Video, Mic, CheckCircle2, AlertTriangle, Clock, ExternalLink, Sparkles } from 'lucide-react';
 import { useDatos } from '../lib/datos.jsx';
-import { Drawer, Card, CardTitle, Badge, Tabla, Guion, LinkCopiable } from './ui.jsx';
+import { Drawer, Card, CardTitle, Badge, Tabla, Guion, LinkCopiable, Boton, Aviso } from './ui.jsx';
 import { fechaHora, pct, colorPct, TONO_ESTADO, nombreEstado } from '../lib/format.js';
 import { esNegativa, NO_RELEVABLE, norm } from '../../shared/logic.js';
 import { MODULOS } from '../../shared/catalog.js';
@@ -17,8 +18,20 @@ function Dato({ k, v }) {
 }
 
 export default function DetalleFormulario({ form, onCerrar }) {
-  const { d, data } = useDatos();
+  const { d, data, accion } = useDatos();
+  const [reev, setReev] = useState({ cargando: false, msg: null });
   if (!form) return null;
+  const conError = form.evidencias.filter((e) => e.error).length;
+  const puede = ['admin', 'responsable'].includes(data.usuario?.rol);
+  async function reevaluar() {
+    setReev({ cargando: true, msg: null });
+    try {
+      const r = await accion({ accion: 'reevaluar', formulario: form.id });
+      setReev({ cargando: false, msg: { tono: r.errores?.length ? 'mal' : 'ok', texto: r.errores?.length ? `Evaluadas ${r.evaluadas}. Errores: ${r.errores.join(' · ')}` : `Listo: ${r.evaluadas} tomas evaluadas.` } });
+    } catch (e) {
+      setReev({ cargando: false, msg: { tono: 'mal', texto: e.message } });
+    }
+  }
   const umbral = Number(data.config.umbral_confianza);
   const tz = form.tienda.timezone;
   const tomas = String(form.tomas || '').split(',').filter(Boolean);
@@ -55,6 +68,16 @@ export default function DetalleFormulario({ form, onCerrar }) {
           </div>
         )}
       </Card>
+
+      {conError > 0 && (
+        <Card>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-xs text-tx2"><b className="text-mal">{conError} {conError === 1 ? 'toma quedó' : 'tomas quedaron'} sin evaluar</b> por un error de la IA. Los videos están guardados en Drive.</div>
+            <Boton variante="primario" icon={Sparkles} cargando={reev.cargando} disabled={!puede} onClick={reevaluar}>Reevaluar con IA</Boton>
+          </div>
+          {reev.msg && <div className="mt-3"><Aviso tono={reev.msg.tono}>{reev.msg.texto}</Aviso></div>}
+        </Card>
+      )}
 
       {form.puntaje && (
         <Card>
@@ -99,7 +122,7 @@ export default function DetalleFormulario({ form, onCerrar }) {
             <CardTitle icon={Video} extra={ev ? (
               <span className="flex items-center gap-2 text-[11px] text-muted">
                 <span className="tabular-nums">{ev.segundos}s</span>
-                <span className="inline-flex items-center gap-1"><Mic className="w-3 h-3" />Código {ev.codigo_ok === 'SI' ? <CheckCircle2 className="w-3.5 h-3.5 text-ok" /> : <AlertTriangle className="w-3.5 h-3.5 text-mal" />}</span>
+                {ev.codigo_ok && <span className="inline-flex items-center gap-1"><Mic className="w-3 h-3" />Código {ev.codigo_ok === 'SI' ? <CheckCircle2 className="w-3.5 h-3.5 text-ok" /> : <AlertTriangle className="w-3.5 h-3.5 text-mal" />}</span>}
               </span>
             ) : <Badge tono="neutro">Sin evidencia</Badge>}>{tid} · {toma.nombre}</CardTitle>
             {ev?.url ? (

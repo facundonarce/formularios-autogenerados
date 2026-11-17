@@ -34,11 +34,19 @@ function colLetter(n) {
 
 /** Lee varias pestañas en una sola llamada. Devuelve { Tabla: [ {col: valor, _row: n} ] } */
 export async function leerTablas(nombres) {
-  const res = await sheetsClient().spreadsheets.values.batchGet({
-    spreadsheetId: SPREADSHEET_ID(),
-    ranges: nombres.map((n) => `${n}!A1:ZZ`),
-    valueRenderOption: 'FORMATTED_VALUE',
-  });
+  let res;
+  try {
+    res = await sheetsClient().spreadsheets.values.batchGet({
+      spreadsheetId: SPREADSHEET_ID(),
+      ranges: nombres.map((n) => `${n}!A1:ZZ`),
+      valueRenderOption: 'FORMATTED_VALUE',
+    });
+  } catch (e) {
+    if (/Unable to parse range/i.test(e.message)) {
+      throw new Error('El Google Sheet todavía no está preparado (faltan pestañas). Abrí /api/setup?secret=<CRON_SECRET> una vez.');
+    }
+    throw e;
+  }
   const out = {};
   res.data.valueRanges.forEach((vr, i) => {
     const [header = [], ...rows] = vr.values || [];

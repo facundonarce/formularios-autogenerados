@@ -308,6 +308,38 @@ export async function registrarToma({ token, toma, archivo, segundos, mime }) {
   return { ok: true, evaluada: !!resultado, codigo_ok: ev.codigo_ok || null };
 }
 
+// Vuelve a evaluar con IA las tomas de un formulario que quedaron con error (por ejemplo, si falló Gemini).
+export async function reevaluar(ctx, formId) {
+  const f = ctx.formularios.find((x) => x.id === formId);
+  if (!f) throw error(404, 'Formulario no encontrado');
+  const tienda = tiendaDe(ctx, f.tienda_id);
+  const pendientes = ctx.evidencias.filter((e) => e.formulario_id === f.id && e.error && e.archivo_id);
+  if (!pendientes.length) throw error(400, 'No hay tomas con error para reevaluar');
+  const umbral = Number(ctx.config.umbral_confianza);
+  let ok = 0;
+  const errores = [];
+  for (const ev of pendientes) {
+    const tomaDef = ctx.tomas.find((t) => t.id === ev.toma);
+    const preguntas = ctx.preguntas.filter((p) => p.toma === ev.toma && aplicaATienda(p, tienda.tipo));
+    try {
+      const video = await descargar(ev.archivo_id);
+      const r = await evaluarToma({ bytes: video.bytes, mime: video.mime, toma: tomaDef, preguntas, productos: parseJson(f.productos, []), codigo: f.codigo, tienda });
+      const codigoOk = String(r.codigo_escuchado || '').replace(/\D/g, '') === String(f.codigo) ? 'SI' : 'NO';
+      await agregarFilas('Respuestas', r.respuestas.map((x) => ({
+        id: nuevoId('R'), formulario_id: f.id, tienda_id: tienda.id, fecha: ev.creado_at || iso(new Date()),
+        pregunta: x.pregunta, respuesta: x.respuesta, confianza: x.confianza, motivo: x.motivo, segundo: x.segundo ?? -1,
+        revision: Number(x.confianza) < umbral || codigoOk === 'NO' ? 'pendiente' : 'ok',
+      })));
+      await actualizarFilas('Evidencias', [{ _row: ev._row, error: '', codigo_ok: codigoOk, evaluado_at: iso(new Date()) }]);
+      ok += 1;
+    } catch (e) {
+      errores.push(`${ev.toma}: ${e.message}`);
+      await actualizarFilas('Evidencias', [{ _row: ev._row, error: e.message }]);
+    }
+  }
+  return { ok: true, evaluadas: ok, errores };
+}
+
 export async function finalizar(ctx, f, { motivo = 'completo' } = {}) {
   const tienda = tiendaDe(ctx, f.tienda_id);
   const cruce = Math.random() < Number(ctx.config.cruce_camaras) ? 'SI' : 'NO';
