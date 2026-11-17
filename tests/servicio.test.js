@@ -132,3 +132,14 @@ test('reevaluar tomas que quedaron con error', async () => {
   assert.equal(db.Evidencias.find((e) => e.id === 'E-err').error, '');
   await assert.rejects(async () => s.reevaluar(await s.cargar(), f.id), /No hay tomas/);
 });
+
+test('la tarea programada reintenta sola las tomas con error', async () => {
+  const f = semanal(0);
+  const toma = String(f.tomas).split(',')[2];
+  db.Evidencias.push({ id: 'E-auto', formulario_id: f.id, toma, archivo_id: 'drive777', url: 'https://drive/z', error: '[2] Gemini: high demand' });
+  db.Evidencias.push({ id: 'E-agotada', formulario_id: f.id, toma: 'T9', archivo_id: 'drive778', url: 'u', error: '[6] Gemini: high demand' });
+  const r = await s.tick('https://x', new Date());
+  assert.ok(r.acciones.some((a) => a.includes('Reintento IA') && a.includes('OK')));
+  assert.equal(db.Evidencias.find((e) => e.id === 'E-auto').error, '');
+  assert.equal(db.Evidencias.find((e) => e.id === 'E-agotada').error, '[6] Gemini: high demand');
+});

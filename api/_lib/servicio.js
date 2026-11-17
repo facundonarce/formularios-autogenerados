@@ -203,6 +203,7 @@ export async function tick(baseUrl, ahora = new Date()) {
     }
   }
   await actualizarFilas('Formularios', cambios);
+  log.push(...await reintentarPendientes(ctx));
   return { ok: true, programados: nuevos.length, acciones: log };
 }
 
@@ -308,36 +309,62 @@ export async function registrarToma({ token, toma, archivo, segundos, mime }) {
   return { ok: true, evaluada: !!resultado, codigo_ok: ev.codigo_ok || null };
 }
 
-// Vuelve a evaluar con IA las tomas de un formulario que quedaron con error (por ejemplo, si falló Gemini).
+// Evalúa (o reevalúa) una evidencia ya guardada en Drive y carga sus respuestas.
+// Si falla, deja el error con el número de intento: "[2] Gemini: ...".
+const intentosDe = (ev) => Number((String(ev.error || '').match(/^\[(\d+)\]/) || [])[1] || 1);
+
+async function evaluarEvidencia(ctx, f, ev) {
+  const tienda = tiendaDe(ctx, f.tienda_id);
+  const tomaDef = ctx.tomas.find((t) => t.id === ev.toma);
+  const preguntas = ctx.preguntas.filter((p) => p.toma === ev.toma && aplicaATienda(p, tienda.tipo));
+  const umbral = Number(ctx.config.umbral_confianza);
+  try {
+    const video = await descargar(ev.archivo_id);
+    const r = await evaluarToma({ bytes: video.bytes, mime: video.mime, toma: tomaDef, preguntas, productos: parseJson(f.productos, []), codigo: f.codigo, tienda });
+    const codigoOk = String(r.codigo_escuchado || '').replace(/\D/g, '') === String(f.codigo) ? 'SI' : 'NO';
+    await agregarFilas('Respuestas', r.respuestas.map((x) => ({
+      id: nuevoId('R'), formulario_id: f.id, tienda_id: tienda.id, fecha: ev.creado_at || iso(new Date()),
+      pregunta: x.pregunta, respuesta: x.respuesta, confianza: x.confianza, motivo: x.motivo, segundo: x.segundo ?? -1,
+      revision: Number(x.confianza) < umbral || codigoOk === 'NO' ? 'pendiente' : 'ok',
+    })));
+    await actualizarFilas('Evidencias', [{ _row: ev._row, error: '', codigo_ok: codigoOk, evaluado_at: iso(new Date()) }]);
+    return { ok: true };
+  } catch (e) {
+    const msg = String(e.message).replace(/^\[\d+\]\s*/, '');
+    await actualizarFilas('Evidencias', [{ _row: ev._row, error: `[${intentosDe(ev) + 1}] ${msg}` }]);
+    return { ok: false, error: msg };
+  }
+}
+
+// Vuelve a evaluar con IA las tomas de un formulario que quedaron con error (botón del panel).
+// Corta a los ~45 s para no pasarse del límite de la función; lo que falte se puede volver a intentar.
 export async function reevaluar(ctx, formId) {
   const f = ctx.formularios.find((x) => x.id === formId);
   if (!f) throw error(404, 'Formulario no encontrado');
-  const tienda = tiendaDe(ctx, f.tienda_id);
   const pendientes = ctx.evidencias.filter((e) => e.formulario_id === f.id && e.error && e.archivo_id);
   if (!pendientes.length) throw error(400, 'No hay tomas con error para reevaluar');
-  const umbral = Number(ctx.config.umbral_confianza);
+  const inicio = Date.now();
   let ok = 0;
   const errores = [];
   for (const ev of pendientes) {
-    const tomaDef = ctx.tomas.find((t) => t.id === ev.toma);
-    const preguntas = ctx.preguntas.filter((p) => p.toma === ev.toma && aplicaATienda(p, tienda.tipo));
-    try {
-      const video = await descargar(ev.archivo_id);
-      const r = await evaluarToma({ bytes: video.bytes, mime: video.mime, toma: tomaDef, preguntas, productos: parseJson(f.productos, []), codigo: f.codigo, tienda });
-      const codigoOk = String(r.codigo_escuchado || '').replace(/\D/g, '') === String(f.codigo) ? 'SI' : 'NO';
-      await agregarFilas('Respuestas', r.respuestas.map((x) => ({
-        id: nuevoId('R'), formulario_id: f.id, tienda_id: tienda.id, fecha: ev.creado_at || iso(new Date()),
-        pregunta: x.pregunta, respuesta: x.respuesta, confianza: x.confianza, motivo: x.motivo, segundo: x.segundo ?? -1,
-        revision: Number(x.confianza) < umbral || codigoOk === 'NO' ? 'pendiente' : 'ok',
-      })));
-      await actualizarFilas('Evidencias', [{ _row: ev._row, error: '', codigo_ok: codigoOk, evaluado_at: iso(new Date()) }]);
-      ok += 1;
-    } catch (e) {
-      errores.push(`${ev.toma}: ${e.message}`);
-      await actualizarFilas('Evidencias', [{ _row: ev._row, error: e.message }]);
-    }
+    if (Date.now() - inicio > 45000) { errores.push(`${ev.toma}: quedó para el próximo intento`); continue; }
+    const r = await evaluarEvidencia(ctx, f, ev);
+    if (r.ok) ok += 1; else errores.push(`${ev.toma}: ${r.error}`);
   }
   return { ok: true, evaluadas: ok, errores };
+}
+
+// Reintento automático desde la tarea programada: hasta 2 tomas con error por corrida, máximo 6 intentos cada una.
+async function reintentarPendientes(ctx) {
+  const evs = ctx.evidencias.filter((e) => e.error && e.archivo_id && intentosDe(e) < 6).slice(0, 2);
+  const log = [];
+  for (const ev of evs) {
+    const f = ctx.formularios.find((x) => x.id === ev.formulario_id);
+    if (!f || f.estado === 'anulado') continue;
+    const r = await evaluarEvidencia(ctx, f, ev);
+    log.push(`Reintento IA ${f.id} ${ev.toma}: ${r.ok ? 'OK' : 'falló'}`);
+  }
+  return log;
 }
 
 export async function finalizar(ctx, f, { motivo = 'completo' } = {}) {

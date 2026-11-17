@@ -1,7 +1,10 @@
 // Agente evaluador: manda el video de una toma a Gemini con las preguntas que cubre
 // y recibe una respuesta por pregunta, con confianza, motivo y segundo del video.
 const BASE = 'https://generativelanguage.googleapis.com';
-const MODEL = () => process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+// GEMINI_MODEL puede tener varios modelos separados por coma: si el primero está saturado se prueba el siguiente.
+const MODELOS = () => String(process.env.GEMINI_MODEL || 'gemini-3.8-flash').split(',').map((m) => m.trim()).filter(Boolean);
+const espera = (ms) => new Promise((r) => setTimeout(r, ms));
+const esTemporal = (status, msg) => [429, 500, 502, 503, 504].includes(status) || /high demand|overloaded|unavailable|try again|rate limit|quota/i.test(msg || '');
 const INLINE_MAX = 18 * 1024 * 1024;
 
 function opcionesDe(p) {
@@ -85,16 +88,24 @@ export async function evaluarToma({ bytes, mime, toma, preguntas, productos, cod
     ? { inline_data: { mime_type: tipo, data: Buffer.from(bytes).toString('base64') } }
     : await subirArchivo(bytes, tipo, key);
 
-  const res = await fetch(`${BASE}/v1beta/models/${MODEL()}:generateContent?key=${key}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ role: 'user', parts: [media, { text: armarPrompt({ toma, preguntas, productos, codigo, tienda }) }] }],
-      generationConfig: { temperature: 0.1, responseMimeType: 'application/json', responseSchema: SCHEMA },
-    }),
+  const body = JSON.stringify({
+    contents: [{ role: 'user', parts: [media, { text: armarPrompt({ toma, preguntas, productos, codigo, tienda }) }] }],
+    generationConfig: { temperature: 0.1, responseMimeType: 'application/json', responseSchema: SCHEMA },
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(`Gemini: ${data?.error?.message || res.status}`);
+  // Reintentos: hasta 3 intentos por modelo con espera creciente si Gemini está saturado.
+  let data;
+  let ultimoError = '';
+  fuera: for (const modelo of MODELOS()) {
+    for (let intento = 0; intento < 3; intento++) {
+      const res = await fetch(`${BASE}/v1beta/models/${modelo}:generateContent?key=${key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok) { data = json; break fuera; }
+      ultimoError = json?.error?.message || `HTTP ${res.status}`;
+      if (!esTemporal(res.status, ultimoError)) throw new Error(`Gemini: ${ultimoError}`);
+      await espera(2000 * 2 ** intento); // 2 s, 4 s, 8 s
+    }
+  }
+  if (!data) throw new Error(`Gemini: ${ultimoError}`);
   const texto = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || '{}';
   const out = JSON.parse(texto);
   const validas = new Set(preguntas.map((p) => p.num));

@@ -72,7 +72,7 @@ export default function DetalleFormulario({ form, onCerrar }) {
       {conError > 0 && (
         <Card>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-xs text-tx2"><b className="text-mal">{conError} {conError === 1 ? 'toma quedó' : 'tomas quedaron'} sin evaluar</b> por un error de la IA. Los videos están guardados en Drive.</div>
+            <div className="text-xs text-tx2"><b className="text-mal">{conError} {conError === 1 ? 'toma quedó' : 'tomas quedaron'} sin evaluar</b> por un error de la IA. Los videos están guardados en Drive y se reintentan solos cada 5 minutos (hasta 6 veces), o podés reintentar ahora.</div>
             <Boton variante="primario" icon={Sparkles} cargando={reev.cargando} disabled={!puede} onClick={reevaluar}>Reevaluar con IA</Boton>
           </div>
           {reev.msg && <div className="mt-3"><Aviso tono={reev.msg.tono}>{reev.msg.texto}</Aviso></div>}
@@ -134,7 +134,7 @@ export default function DetalleFormulario({ form, onCerrar }) {
                 <Video className="w-4 h-4 mr-1.5" /> Video de la toma (en el modo demo no hay archivos)
               </div>
             ) : null}
-            {ev?.error && <div className="text-[11px] text-mal mb-2">Error al evaluar: {ev.error}</div>}
+            {ev?.error && <div className="text-[11px] text-mal mb-2">Error al evaluar{/^\[(\d+)\]/.test(ev.error) ? ` (intento ${ev.error.match(/^\[(\d+)\]/)[1]})` : ''}: {ev.error.replace(/^\[\d+\]\s*/, '')}</div>}
             {resp.length > 0 && (
               <Tabla densa columnas={[
                 { key: 'pregunta', titulo: 'N°', render: (r) => r.pregunta },
