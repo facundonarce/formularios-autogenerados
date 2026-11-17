@@ -15,34 +15,45 @@ function expirado(token) {
 }
 
 export function AuthProvider({ children }) {
-  const [token, setToken] = useState(() => {
+  // El token se pasa al cliente de API en el mismo momento en que cambia (no en un efecto),
+  // porque el panel pide los datos apenas se monta y los efectos de los hijos corren antes que los del padre.
+  const [token, setTokenState] = useState(() => {
     if (DEMO) return 'demo';
-    const t = sessionStorage.getItem(KEY);
-    return t && !expirado(t) ? t : null;
+    let t = null;
+    try { t = sessionStorage.getItem(KEY); } catch { /* sin storage */ }
+    t = t && !expirado(t) ? t : null;
+    setTokenGoogle(t);
+    return t;
   });
-
-  useEffect(() => {
-    setTokenGoogle(DEMO ? null : token);
-    if (!DEMO) token ? sessionStorage.setItem(KEY, token) : sessionStorage.removeItem(KEY);
-  }, [token]);
-
-  const salir = useCallback(() => {
-    setToken(null);
-    window.google?.accounts?.id?.disableAutoSelect?.();
+  const setToken = useCallback((t) => {
+    if (!DEMO) {
+      setTokenGoogle(t);
+      try { t ? sessionStorage.setItem(KEY, t) : sessionStorage.removeItem(KEY); } catch { /* sin storage */ }
+    }
+    setTokenState(t);
   }, []);
 
-  return <Ctx.Provider value={{ token, setToken, salir, demo: DEMO }}>{children}</Ctx.Provider>;
+  const [motivo, setMotivo] = useState(null);
+  const salir = useCallback((razon) => {
+    setToken(null);
+    setMotivo(typeof razon === 'string' ? razon : null);
+    window.google?.accounts?.id?.disableAutoSelect?.();
+  }, [setToken]);
+  const ingresar = useCallback((t) => { setMotivo(null); setToken(t); }, [setToken]);
+
+  return <Ctx.Provider value={{ token, setToken: ingresar, salir, motivo, demo: DEMO }}>{children}</Ctx.Provider>;
 }
 
 export function BotonGoogle() {
-  const { setToken } = useAuth();
+  const { setToken, motivo } = useAuth();
   const ref = useRef(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     if (!CLIENT_ID) { setError('Falta configurar VITE_GOOGLE_CLIENT_ID'); return; }
     const init = () => {
-      window.google.accounts.id.initialize({ client_id: CLIENT_ID, callback: (r) => setToken(r.credential), auto_select: true });
+      // Sin auto_select después de un rechazo, para no entrar en un bucle de ingreso.
+      window.google.accounts.id.initialize({ client_id: CLIENT_ID, callback: (r) => setToken(r.credential), auto_select: !motivo });
       window.google.accounts.id.renderButton(ref.current, { theme: 'outline', size: 'large', shape: 'pill', text: 'continue_with', locale: 'es' });
     };
     if (window.google?.accounts?.id) return init();
@@ -52,10 +63,11 @@ export function BotonGoogle() {
     s.onload = init;
     s.onerror = () => setError('No se pudo cargar el ingreso con Google');
     document.head.appendChild(s);
-  }, [setToken]);
+  }, [setToken, motivo]);
 
   return (
     <div className="flex flex-col items-center gap-2">
+      {motivo && <div className="w-full rounded-xl border border-mal/30 bg-mal-bg px-3 py-2 text-[11px] text-mal text-left">{motivo}</div>}
       <div ref={ref} />
       {error && <div className="text-[11px] text-mal">{error}</div>}
     </div>

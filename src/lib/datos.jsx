@@ -17,7 +17,7 @@ export function DatosProvider({ children, onSesionVencida }) {
       setData(await api.dataset());
       setError(null);
     } catch (e) {
-      if (e.status === 401) onSesionVencida?.();
+      if (e.status === 401 || e.status === 403) onSesionVencida?.(e.message);
       setError(e.message);
     } finally {
       setCargando(false);

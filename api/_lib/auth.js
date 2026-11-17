@@ -9,12 +9,17 @@ export async function usuarioDesde(req, usuarios) {
   const h = req.headers.authorization || '';
   const token = h.startsWith('Bearer ') ? h.slice(7) : null;
   if (!token) throw error(401, 'Sesión no iniciada');
+  const clientId = String(process.env.GOOGLE_CLIENT_ID || '').trim();
+  if (!clientId) throw error(500, 'Falta la variable GOOGLE_CLIENT_ID en Vercel');
   let payload;
   try {
-    const ticket = await client.verifyIdToken({ idToken: token, audience: process.env.GOOGLE_CLIENT_ID });
+    const ticket = await client.verifyIdToken({ idToken: token, audience: clientId });
     payload = ticket.getPayload();
-  } catch {
-    throw error(401, 'Sesión vencida. Volvé a ingresar.');
+  } catch (e) {
+    const msg = /audience/i.test(e.message)
+      ? 'El ID de cliente de la app no coincide con GOOGLE_CLIENT_ID de Vercel (revisá que VITE_GOOGLE_CLIENT_ID y GOOGLE_CLIENT_ID sean iguales y volvé a hacer Redeploy).'
+      : /expired|too late/i.test(e.message) ? 'La sesión venció. Volvé a ingresar.' : `No se pudo validar el ingreso: ${e.message}`;
+    throw error(401, msg);
   }
   const email = String(payload.email || '').toLowerCase();
   const u = usuarios.find((x) => String(x.email).toLowerCase() === email);
